@@ -56,23 +56,44 @@ def load_data() -> Tuple[
 Featurization
 """
 
-
 def featurize(sentence: str, embeddings: gensim.models.keyedvectors.KeyedVectors) -> Union[None, torch.FloatTensor]:
     # sequence of word embeddings
     vectors = []
-
     # map each word to its embedding
     for word in word_tokenize(sentence.lower()):
         try:
             vectors.append(embeddings[word])
         except KeyError:
             pass
-
+    
     # TODO: complete the function to compute the average embedding of the sentence
-    # your return should be
-    # None - if the vector sequence is empty, i.e. the sentence is empty or None of the words in the sentence is in the embedding vocabulary
-    # A torch tensor of shape (embed_dim,) - the average word embedding of the sentence
-    # Hint: follow the hints in the pdf description
+    # Check if vectors list is empty
+    if not vectors:
+        return None
+    
+    # Convert list of numpy arrays to torch tensor
+    # Stack vectors into a 2D tensor of shape (num_words, embed_dim)
+    vectors_tensor = torch.stack([torch.from_numpy(vec) for vec in vectors])
+    
+    # Compute average along the first dimension (across words)
+    # Result will be shape (embed_dim,)
+    average_embedding = torch.mean(vectors_tensor, dim=0)
+    
+    # Convert to FloatTensor and return
+    return average_embedding.float()
+
+
+
+
+###############################
+
+#(.1189+float(vectors_tensor[1][0])+float(vectors_tensor[2][0])+float(vectors_tensor[3][0]))/4
+
+#embeddings = gensim.downloader.load('glove-wiki-gigaword-50')
+#sentence = "I love machine learning"
+#embedding = featurize(sentence, embeddings)
+
+#######################
 
 
 def create_tensor_dataset(raw_data: Dict[str, List[Union[int, str]]],
@@ -80,10 +101,13 @@ def create_tensor_dataset(raw_data: Dict[str, List[Union[int, str]]],
     all_features, all_labels = [], []
     for text, label in tqdm(zip(raw_data['text'], raw_data['label'])):
 
-        # TODO: complete the for loop to featurize each sentence
-        # only add the feature and label to the list if the feature is not None
-
-        # your code ends here
+        # Featurize the sentence
+        feature = featurize(text, embeddings)
+        
+        # Only add the feature and label if the feature is not None
+        if feature is not None:
+            all_features.append(feature)
+            all_labels.append(label)
 
     # stack all features and labels into two single tensors and create a TensorDataset
     features_tensor = torch.stack(all_features)
@@ -91,6 +115,33 @@ def create_tensor_dataset(raw_data: Dict[str, List[Union[int, str]]],
 
     return TensorDataset(features_tensor, labels_tensor)
 
+##################
+
+#raw_data = {
+#    'text': [
+#        "This movie was absolutely amazing and brilliant!",      # Positive
+#        "I loved the acting and the story was great",           # Positive  
+#        "Terrible movie with bad acting and boring plot",       # Negative
+#        "Worst film I have ever seen in my life",              # Negative
+#        "The cinematography was beautiful and engaging",        # Positive
+#        "xyzabc qwerty nonsense",                              # Should be filtered (unknown words)
+#        "",                                                     # Should be filtered (empty)
+#        "Good movie with excellent direction",                  # Positive
+#    ],
+#    'label': [1, 1, 0, 0, 1, 1, 0, 1]  # 1 = positive, 0 = negative
+#}
+
+#embeddings = gensim.downloader.load('glove-wiki-gigaword-50')
+#dataset = create_tensor_dataset(raw_data, embeddings)
+
+#print each sample in dataset
+#for i in range(len(dataset)):
+#    feature, label = dataset[i]
+#    print(f"Sample {i}: Feature shape: {feature}, Label: {label}")
+
+
+
+#################
 
 """
 Dataloader
@@ -106,32 +157,44 @@ Defining our First PyTorch Model
 """
 
 
+
 class SentimentClassifier(nn.Module):
     def __init__(self, embed_dim, num_classes):
         super().__init__()
         self.embed_dim = embed_dim
         self.num_classes = num_classes
-
+        
         # TODO: define the linear layer
         # Hint: follow the hints in the pdf description
-
+        self.linear = nn.Linear(embed_dim, num_classes)
         # your code ends here
-
+        
         self.loss = nn.CrossEntropyLoss(reduction='mean')
-
+    
     def forward(self, inp):
         # TODO: complete the forward function
         # Hint: follow the hints in the pdf description
-
+        logits = self.linear(inp)
         # your code ends here
-
+        
         return logits
+    
+#######################
+# Initialize model
+#embeddings = gensim.downloader.load('glove-wiki-gigaword-50')
+#embed_dim = embeddings.vector_size  # 50 for GloVe-50
+#num_classes = 2  # Binary classification
+#model = SentimentClassifier(embed_dim, num_classes)
+# Test forward pass with dummy input
+#dummy_input = torch.randn(4, embed_dim)  # Batch size of 4
+#logits = model(dummy_input)
+#print(f"Logits shape: {logits.shape}")  # Should be (4, 2)
 
+######################
 
 """
 Chain Everything Together: Training and Evaluation
 """
-
 
 def accuracy(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.FloatTensor:
     assert logits.shape[0] == labels.shape[0]
@@ -139,9 +202,24 @@ def accuracy(logits: torch.FloatTensor, labels: torch.LongTensor) -> torch.Float
     # Hint: follow the hints in the pdf description, the return should be a tensor of 0s and 1s with the same shape as labels
     # labels is a tensor of shape (batch_size,)
     # logits is a tensor of shape (batch_size, num_classes)
+    
+    # Get predicted class indices by finding the maximum logit along dimension 1 (class dimension)
+    predictions = torch.argmax(logits, dim=1)  # Shape: (batch_size,)
+    
+    # Compare predictions with true labels and convert to float (1.0 for correct, 0.0 for incorrect)
+    correct = (predictions == labels).float()  # Shape: (batch_size,)
+    
+    return correct
 
-    return ...
 
+######################
+#test accuracy function
+#logits = torch.tensor([[2.0, 1.0], [0.5, 1.5], [1.0, 3.0], [4.0, 2.0]])
+#labels = torch.tensor([0, 1, 1, 0])
+#acc = accuracy(logits, labels)
+#print(f"Accuracy tensor: {acc}")  # Should be tensor([1., 1., 1., 1.])
+
+#####################
 
 def evaluate(model: SentimentClassifier, eval_dataloader: DataLoader) -> Tuple[float, float]:
     model.eval()
